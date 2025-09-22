@@ -1,6 +1,6 @@
 // Compilar y ejecutar con:
 //  javac MemoriaVirtual.java
-//  java MemoriaVirtual gen config.txt        # pción 1: generar referencias
+//  java MemoriaVirtual gen config.txt        #Opción 1: generar referencias
 //  java MemoriaVirtual sim NPROC NFRAMES     #Opción 2: simular ejecución
 
 import java.io.*;
@@ -17,13 +17,14 @@ public class MemoriaVirtual {
         int punteroDV = 0;
 
         final Map<Long, Integer> tablaPaginas = new HashMap<>();
-
         final List<Integer> marcosAsignados = new ArrayList<>();
 
         final long totalReferencias;
         long fallosPagina = 0;
         long accesosSwap = 0;
         long aciertos = 0;
+
+        boolean falloPrevio = false;
 
         Proceso(int id, int tp, int nf, int nc, long[] dv) {
             this.id = id;
@@ -37,9 +38,12 @@ public class MemoriaVirtual {
 
         long dvActual() { return dv[punteroDV]; }
 
-        void avanzarSiAcierto() { punteroDV++; aciertos++; }
+        void procesarHit() {
+            if (!falloPrevio) aciertos++;
+            falloPrevio = false;
+            punteroDV++;
+        }
     }
-
 
     static class Marco {
         int indice;
@@ -47,19 +51,16 @@ public class MemoriaVirtual {
         int procesoDueno = -1;
         long paginaVirtual = -1;
         long ultimoUso = -1;
-
         int asignadoAProceso = -1;
 
         Marco(int idx) { this.indice = idx; }
     }
 
-
     static class MemoriaRAM {
         final Marco[] marcos;
-        long relojLRU = 0; 
+        long relojLRU = 0;
         MemoriaRAM(int n) { marcos = new Marco[n]; for (int i=0;i<n;i++) marcos[i] = new Marco(i); }
     }
-
 
     static long divisionRedondeoArriba(long a, long b) { return (a + b - 1) / b; }
 
@@ -71,7 +72,9 @@ public class MemoriaVirtual {
         return out;
     }
 
+
     // Opción 1: Generar Referencias
+
     static void generarReferencias(String configPath) throws Exception {
         Map<String,String> cfg = leerConfig(configPath);
         int TP = Integer.parseInt(cfg.get("TP"));
@@ -90,13 +93,25 @@ public class MemoriaVirtual {
             long baseB = baseA + bytesPorMatriz;
             long baseC = baseB + bytesPorMatriz;
 
-            List<Long> referencias = new ArrayList<>((int)(elementos*3));
+            List<String> lineas = new ArrayList<>((int)(elementos*3));
             for (int i = 0; i < nf; i++) {
                 for (int j = 0; j < nc; j++) {
-                    long desplazamiento = ((long)i * nc + j) * 4L; // row-major
-                    referencias.add(baseA + desplazamiento);
-                    referencias.add(baseB + desplazamiento);
-                    referencias.add(baseC + desplazamiento);
+                    long desp = ((long)i * nc + j) * 4L;
+
+                    long dvA = baseA + desp;
+                    long paginaA = dvA / TP;
+                    long offA = dvA % TP;
+                    lineas.add("M1:[" + i + "-" + j + "]," + paginaA + "," + offA + ",r");
+
+                    long dvB = baseB + desp;
+                    long paginaB = dvB / TP;
+                    long offB = dvB % TP;
+                    lineas.add("M2:[" + i + "-" + j + "]," + paginaB + "," + offB + ",r");
+
+                    long dvC = baseC + desp;
+                    long paginaC = dvC / TP;
+                    long offC = dvC % TP;
+                    lineas.add("M3:[" + i + "-" + j + "]," + paginaC + "," + offC + ",w");
                 }
             }
 
@@ -108,11 +123,11 @@ public class MemoriaVirtual {
                 pw.println("TP=" + TP);
                 pw.println("NF=" + nf);
                 pw.println("NC=" + nc);
-                pw.println("NR=" + referencias.size());
+                pw.println("NR=" + lineas.size());
                 pw.println("NP=" + NP);
-                for (long dir : referencias) pw.println(dir);
+                for (String s : lineas) pw.println(s);
             }
-            System.out.println("Generado " + nombreSalida + " (NR=" + referencias.size() + ", NP=" + NP + ")");
+            System.out.println("Generado " + nombreSalida + " (NR=" + lineas.size() + ", NP=" + NP + ")");
         }
     }
 
@@ -123,13 +138,11 @@ public class MemoriaVirtual {
             String[] kv = line.split("=", 2);
             m.put(kv[0].trim().toUpperCase(), kv[1].trim());
         }
-
         for (String k : Arrays.asList("TP","NPROC","TAMS")) {
             if (!m.containsKey(k)) throw new IllegalArgumentException("Falta parametro " + k);
         }
         return m;
     }
-
 
     static Proceso cargarProcesoDesdeArchivo(int pid) throws Exception {
         String path = "proc" + pid + ".txt";
@@ -152,12 +165,24 @@ public class MemoriaVirtual {
         }
 
         List<Long> dv = new ArrayList<>();
-        for (; idx < lines.size(); idx++) dv.add(Long.parseLong(lines.get(idx)));
+        for (; idx < lines.size(); idx++) {
+            String s = lines.get(idx);
+            if (s.contains(",")) {
+                String[] campos = s.split(",");
+                long pagina = Long.parseLong(campos[1].trim());
+                long offset = Long.parseLong(campos[2].trim());
+                long direccion = pagina * (long)TP + offset;
+                dv.add(direccion);
+            } else {
+                dv.add(Long.parseLong(s));
+            }
+        }
         if (dv.size() != NR) throw new IllegalArgumentException("NR no coincide con el número de dv en " + path);
         long[] arr = new long[dv.size()];
         for (int i=0;i<dv.size();i++) arr[i] = dv.get(i);
         return new Proceso(pid, TP, NF, NC, arr);
     }
+
 
     // Opción 2: Simulación
 
@@ -181,10 +206,8 @@ public class MemoriaVirtual {
             }
         }
 
-
         Deque<Integer> cola = new ArrayDeque<>();
         for (int pid=0; pid<numProcesos; pid++) cola.add(pid);
-
 
         Set<Integer> vivos = new HashSet<>();
         for (int pid=0; pid<numProcesos; pid++) vivos.add(pid);
@@ -203,10 +226,10 @@ public class MemoriaVirtual {
             if (acierto) {
                 Marco m = ram.marcos[indiceMarco];
                 m.ultimoUso = ++ram.relojLRU;
-                p.avanzarSiAcierto();
-            } 
-            else {
+                p.procesarHit(); 
+            } else {
                 p.fallosPagina++;
+                p.falloPrevio = true;
 
                 Integer indiceLibre = null;
                 for (int fi : p.marcosAsignados) {
@@ -216,15 +239,10 @@ public class MemoriaVirtual {
                 if (indiceLibre != null) {
                     cargarPagina(ram, procesos, p, vpn, indiceLibre);
                     p.accesosSwap += 1;
-                } 
-                else {
+                } else {
                     int victima = elegirVictimaLRU(ram, p);
                     Marco v = ram.marcos[victima];
-
-                    if (v.procesoDueno != p.id) {
-                        throw new IllegalStateException("Victima no pertenece al mismo proceso asignado");
-                    }
-
+                    if (v.procesoDueno != p.id) throw new IllegalStateException("Victima no pertenece al mismo proceso asignado");
                     procesos[p.id].tablaPaginas.remove(v.paginaVirtual);
                     cargarPagina(ram, procesos, p, vpn, victima);
                     p.accesosSwap += 2;
@@ -233,25 +251,23 @@ public class MemoriaVirtual {
 
             if (!p.terminado()) {
                 cola.addLast(pid);
-            } 
-            else {
+            } else {
                 vivos.remove(pid);
                 reasignarMarcosDe(ram, procesos, pid, vivos);
             }
         }
 
-
-        System.out.println("===== RESULTADOS =====");
+        // Respuesta
         for (Proceso p : procesos) {
-            long refs = p.totalReferencias;
-            long faults = p.fallosPagina;
-            long swaps = p.accesosSwap;
-            long hits = p.aciertos;
-            double tasaFallos = refs == 0 ? 0 : (faults * 1.0 / refs);
-            double tasaExito  = refs == 0 ? 0 : (hits   * 1.0 / refs);
-            System.out.printf(Locale.US,
-                "Proceso %d -> Refs=%d, Fallos=%d, SWAP=%d, TasaFallos=%.4f, TasaExito=%.4f\n",
-                p.id, refs, faults, swaps, tasaFallos, tasaExito);
+            double tasaFallos = p.totalReferencias == 0 ? 0 : (p.fallosPagina * 1.0 / p.totalReferencias);
+            double tasaExito  = p.totalReferencias == 0 ? 0 : (p.aciertos     * 1.0 / p.totalReferencias);
+            System.out.println("Proceso: " + p.id);
+            System.out.println("- Num referencias: " + p.totalReferencias);
+            System.out.println("- Fallas: " + p.fallosPagina);
+            System.out.println("- Hits: " + p.aciertos);
+            System.out.println("- SWAP: " + p.accesosSwap);
+            System.out.printf ("- Tasa fallas: %.4f%n", tasaFallos);
+            System.out.printf ("- Tasa éxito: %.4f%n",  tasaExito);
         }
     }
 
@@ -271,9 +287,7 @@ public class MemoriaVirtual {
             if (!m.ocupado) continue;
             if (m.ultimoUso < best) { best = m.ultimoUso; victima = fi; }
         }
-        if (victima == -1) {
-            victima = p.marcosAsignados.get(0);
-        }
+        if (victima == -1) victima = p.marcosAsignados.get(0);
         return victima;
     }
 
@@ -294,7 +308,6 @@ public class MemoriaVirtual {
             if (m.procesoDueno == pidTerminado) {
                 fin.tablaPaginas.remove(m.paginaVirtual);
             }
-
             m.ocupado = false;
             m.procesoDueno = -1;
             m.paginaVirtual = -1;
@@ -306,7 +319,6 @@ public class MemoriaVirtual {
 
 
     // Main
-
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
             System.out.println("Uso:\n  java MemoriaVirtual gen <config.txt>\n  java MemoriaVirtual sim <NPROC> <NFRAMES>");
