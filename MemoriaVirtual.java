@@ -1,7 +1,7 @@
 // Compilar y ejecutar con:
 //  javac MemoriaVirtual.java
-//  java MemoriaVirtual gen config.txt        #Opción 1: generar referencias
-//  java MemoriaVirtual sim NPROC NFRAMES     #Opción 2: simular ejecución
+//  java MemoriaVirtual.java gen config.txt        #Opción 1: generar referencias
+//  java MemoriaVirtual.java sim NPROC NFRAMES     #Opción 2: simular ejecución
 
 import java.io.*;
 import java.util.*;
