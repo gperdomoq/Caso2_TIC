@@ -45,6 +45,7 @@ public class MemoriaVirtual {
         }
     }
 
+
     static class Marco {
         int indice;
         boolean ocupado = false;
@@ -56,13 +57,16 @@ public class MemoriaVirtual {
         Marco(int idx) { this.indice = idx; }
     }
 
+
     static class MemoriaRAM {
         final Marco[] marcos;
         long relojLRU = 0;
         MemoriaRAM(int n) { marcos = new Marco[n]; for (int i=0;i<n;i++) marcos[i] = new Marco(i); }
     }
 
+
     static long divisionRedondeoArriba(long a, long b) { return (a + b - 1) / b; }
+
 
     static List<String> leerLineas(String path) throws IOException {
         List<String> out = new ArrayList<>();
@@ -74,7 +78,6 @@ public class MemoriaVirtual {
 
 
     // Opción 1: Generar Referencias
-
     static void generarReferencias(String configPath) throws Exception {
         Map<String,String> cfg = leerConfig(configPath);
         int TP = Integer.parseInt(cfg.get("TP"));
@@ -131,6 +134,7 @@ public class MemoriaVirtual {
         }
     }
 
+
     static Map<String,String> leerConfig(String path) throws Exception {
         Map<String,String> m = new HashMap<>();
         for (String line : leerLineas(path)) {
@@ -138,16 +142,21 @@ public class MemoriaVirtual {
             String[] kv = line.split("=", 2);
             m.put(kv[0].trim().toUpperCase(), kv[1].trim());
         }
+
         for (String k : Arrays.asList("TP","NPROC","TAMS")) {
             if (!m.containsKey(k)) throw new IllegalArgumentException("Falta parametro " + k);
         }
         return m;
     }
 
+
     static Proceso cargarProcesoDesdeArchivo(int pid) throws Exception {
         String path = "proc" + pid + ".txt";
         List<String> lines = leerLineas(path);
         int TP=0, NF=0, NC=0; long NR=0; long NP=0;
+
+        System.out.println("PROC " + pid + " == Leyendo archivo de configuración ==");
+
         int idx = 0;
         for (; idx < lines.size(); idx++) {
             String s = lines.get(idx);
@@ -156,11 +165,11 @@ public class MemoriaVirtual {
             String key = kv[0].trim().toUpperCase();
             String val = kv[1].trim();
             switch (key) {
-                case "TP": TP = Integer.parseInt(val); break;
-                case "NF": NF = Integer.parseInt(val); break;
-                case "NC": NC = Integer.parseInt(val); break;
-                case "NR": NR = Long.parseLong(val); break;
-                case "NP": NP = Long.parseLong(val); break;
+                case "TP": TP = Integer.parseInt(val); System.out.println("PROC " + pid + "leyendo TP. Tam Páginas: " + TP); break;
+                case "NF": NF = Integer.parseInt(val); System.out.println("PROC " + pid + "leyendo NF. Num Filas: " + NF); break;
+                case "NC": NC = Integer.parseInt(val); System.out.println("PROC " + pid + "leyendo NC. Num Cols: " + NC); break;
+                case "NR": NR = Long.parseLong(val); System.out.println("PROC " + pid + "leyendo NR. Num Referencias: " + NR); break;
+                case "NP": NP = Long.parseLong(val); System.out.println("PROC " + pid + "leyendo NP. Num Paginas: " + NP); break;
             }
         }
 
@@ -178,6 +187,9 @@ public class MemoriaVirtual {
             }
         }
         if (dv.size() != NR) throw new IllegalArgumentException("NR no coincide con el número de dv en " + path);
+
+        System.out.println("PROC " + pid + "== Terminó de leer archivo de configuración ==");
+
         long[] arr = new long[dv.size()];
         for (int i=0;i<dv.size();i++) arr[i] = dv.get(i);
         return new Proceso(pid, TP, NF, NC, arr);
@@ -185,7 +197,6 @@ public class MemoriaVirtual {
 
 
     // Opción 2: Simulación
-
     static void simular(int numProcesos, int marcosTotales) throws Exception {
 
         Proceso[] procesos = new Proceso[numProcesos];
@@ -203,8 +214,11 @@ public class MemoriaVirtual {
             for (int k=0;k<marcosPorProceso;k++,f++) {
                 ram.marcos[f].asignadoAProceso = pid;
                 procesos[pid].marcosAsignados.add(f);
+                System.out.println("Proceso " + pid + ": recibe marco " + f);
             }
         }
+
+        System.out.println("Simulación:");
 
         Deque<Integer> cola = new ArrayDeque<>();
         for (int pid=0; pid<numProcesos; pid++) cola.add(pid);
@@ -217,6 +231,9 @@ public class MemoriaVirtual {
             Proceso p = procesos[pid];
             if (p.terminado()) continue;
 
+            System.out.println("Turno proc: " + pid);
+            System.out.println("PROC " + pid + " analizando linea_: " + p.punteroDV);
+
             long dvActual = p.dvActual();
             long vpn = dvActual / TP;
 
@@ -226,10 +243,13 @@ public class MemoriaVirtual {
             if (acierto) {
                 Marco m = ram.marcos[indiceMarco];
                 m.ultimoUso = ++ram.relojLRU;
-                p.procesarHit(); 
+                p.procesarHit();
+                System.out.println("PROC " + pid + " hits: " + p.aciertos);
+                System.out.println("PROC " + pid + " envejecimiento");
             } else {
                 p.fallosPagina++;
                 p.falloPrevio = true;
+                System.out.println("PROC " + pid + " falla de pag: " + p.fallosPagina);
 
                 Integer indiceLibre = null;
                 for (int fi : p.marcosAsignados) {
@@ -247,15 +267,20 @@ public class MemoriaVirtual {
                     cargarPagina(ram, procesos, p, vpn, victima);
                     p.accesosSwap += 2;
                 }
+                System.out.println("PROC " + pid + " envejecimiento");
             }
 
             if (!p.terminado()) {
                 cola.addLast(pid);
             } else {
+                System.out.println("========================");
+                System.out.println("Termino proc: " + pid);
+                System.out.println("========================");
                 vivos.remove(pid);
                 reasignarMarcosDe(ram, procesos, pid, vivos);
             }
         }
+
 
         // Respuesta
         for (Proceso p : procesos) {
@@ -271,6 +296,7 @@ public class MemoriaVirtual {
         }
     }
 
+
     static void cargarPagina(MemoriaRAM ram, Proceso[] procesos, Proceso p, long vpn, int indiceMarco) {
         Marco m = ram.marcos[indiceMarco];
         m.ocupado = true;
@@ -279,6 +305,7 @@ public class MemoriaVirtual {
         m.ultimoUso = ++ram.relojLRU;
         p.tablaPaginas.put(vpn, indiceMarco);
     }
+
 
     static int elegirVictimaLRU(MemoriaRAM ram, Proceso p) {
         int victima = -1; long best = Long.MAX_VALUE;
@@ -290,6 +317,7 @@ public class MemoriaVirtual {
         if (victima == -1) victima = p.marcosAsignados.get(0);
         return victima;
     }
+
 
     static void reasignarMarcosDe(MemoriaRAM ram, Proceso[] procesos, int pidTerminado, Set<Integer> vivos) {
         Proceso fin = procesos[pidTerminado];
@@ -308,16 +336,18 @@ public class MemoriaVirtual {
             if (m.procesoDueno == pidTerminado) {
                 fin.tablaPaginas.remove(m.paginaVirtual);
             }
+            System.out.println("PROC " + fin.id + " removiendo marco: " + fi);
             m.ocupado = false;
             m.procesoDueno = -1;
             m.paginaVirtual = -1;
             m.asignadoAProceso = procObjetivo.id;
             procObjetivo.marcosAsignados.add(fi);
+            System.out.println("PROC " + procObjetivo.id + " asignando marco nuevo " + fi);
         }
         fin.marcosAsignados.clear();
     }
 
-
+    
     // Main
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
